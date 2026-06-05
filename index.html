@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>一分钟短剧互动影游</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <script defer src="./app.js"></script>
+  </head>
+  <body>
+    <main class="app" id="app">
+      <video id="sceneVideo" class="scene-video" playsinline preload="auto"></video>
+
+      <div class="veil" aria-hidden="true"></div>
+
+      <section class="intro-overlay is-visible" id="introOverlay" aria-label="角色选择">
+        <div class="intro-copy">
+          <span class="intro-kicker">第一视角</span>
+          <h1>先选角色，再直接带声进入</h1>
+          <p>
+            点击小新或小彻，画面会从该角色的视角开始。视频保持全屏，角色信息和分支选择只作为悬浮层出现。
+          </p>
+        </div>
+        <div class="role-grid" id="roleGrid"></div>
+        <p class="intro-foot">选择后，你会从这个人物的第一视角继续整段影像。</p>
+      </section>
+
+      <header class="hud" aria-label="播放器信息">
+        <div class="hud-left">
+          <button class="chip role-chip ghost" id="roleChip" type="button">视角待选</button>
+          <div class="chip" id="routeChip">镜头 01</div>
+          <div class="chip ghost" id="visitChip">未开局</div>
+        </div>
+
+        <div class="hud-center" aria-label="播放器控制">
+          <button class="icon-btn" id="prevBtn" type="button" title="上一幕" aria-label="上一幕"></button>
+          <button class="icon-btn" id="playBtn" type="button" title="播放" aria-label="播放"></button>
+          <button class="icon-btn" id="muteBtn" type="button" title="静音" aria-label="静音"></button>
+          <button class="icon-btn" id="autoBtn" type="button" title="自动" aria-label="自动"></button>
+          <button class="icon-btn" id="restartBtn" type="button" title="重播" aria-label="重播"></button>
+          <button class="icon-btn" id="nextBtn" type="button" title="下一幕" aria-label="下一幕"></button>
+        </div>
+
+        <div class="hud-right">
+          <div class="chip" id="sceneMood">待选</div>
+          <div class="chip ghost" id="durationLabel">时长 --</div>
+        </div>
+      </header>
+
+      <button class="start-gate" id="playGate" type="button" aria-label="继续播放">
+        <span class="gate-icon" aria-hidden="true"></span>
+        <span class="gate-text">继续播放</span>
+      </button>
+
+      <section class="story-card" id="storyCard" aria-label="剧情信息">
+        <div class="story-kicker">
+          <span class="story-pill" id="scenePill">序章</span>
+          <span class="story-pill ghost" id="currentRouteLabel">等待选择</span>
+        </div>
+
+        <div class="story-role" id="storyRoleLine">
+          <img id="storyRoleAvatar" alt="" />
+          <div class="story-role-copy">
+            <div class="story-role-label">第一视角</div>
+            <div class="story-role-name" id="storyRoleName">请选择小新或小彻</div>
+            <p class="story-role-desc" id="storyRoleDesc">先完成角色选择，再进入画面。</p>
+          </div>
+        </div>
+
+        <h1 id="sceneTitle">选择角色开始</h1>
+        <p class="story-summary" id="sceneSummary">点击角色卡后，视频会直接带声播放。</p>
+        <p class="story-caption" id="captionLine"></p>
+        <div class="story-foot">
+          <div class="progress-track" id="progressTrack" aria-hidden="true">
+            <span class="progress-fill" id="progressFill"></span>
+          </div>
+          <div class="time-line" id="timeLine">00:00 / 00:00</div>
+        </div>
+      </section>
+
+      <section class="choice-zone" id="choiceZone" aria-label="分支选择"></section>
+    </main>
+  </body>
+</html>
