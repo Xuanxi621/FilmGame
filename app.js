@@ -304,6 +304,16 @@ const orderedSceneIds = scenes.map((scene) => scene.id);
 const storageKey = "filmgame-ui-state-v3";
 const storage = safeStorage();
 const previewChoiceMode = new URLSearchParams(window.location.search).get("preview") === "choices";
+const appShellAssets = ["./index.html", "./styles.css", "./app.js"];
+const roleImageAssets = roles.map((role) => role.image);
+const scenePosterAssets = scenes.map((scene) => scene.poster);
+const sceneVideoAssets = scenes.map((scene) => scene.video);
+const preloadedAssetUrls = new Set();
+const scheduledAssetUrls = new Set();
+let assetWarmTimer = null;
+let serviceWorkerRegistration = null;
+let serviceWorkerReady = false;
+let serviceWorkerQueue = [];
 
 const state = {
   currentId: "01",
@@ -408,6 +418,274 @@ function safeStorage() {
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
+}
+
+function resolveAssetUrl(assetPath) {
+  try {
+    return new URL(assetPath, window.location.href).href;
+  } catch {
+    return assetPath;
+  }
+}
+
+function uniqueAssets(assets) {
+  return [...new Set((assets ?? []).filter(Boolean).map(resolveAssetUrl))];
+}
+
+function isImageAsset(assetUrl) {
+  return /\.(png|jpe?g|webp|gif|avif)(?:[?#].*)?$/i.test(assetUrl);
+}
+
+function isVideoAsset(assetUrl) {
+  return /\.(mp4|webm|mov)(?:[?#].*)?$/i.test(assetUrl);
+}
+
+function shouldAvoidHeavyCaching() {
+  const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+  const effectiveType = connection?.effectiveType ?? "";
+  return Boolean(connection?.saveData) || /(^|[^a-z])(2g|slow-2g)($|[^a-z])/i.test(effectiveType);
+}
+
+function canUseServiceWorkerCache() {
+  return "serviceWorker" in navigator && window.isSecureContext && location.protocol !== "file:";
+}
+
+function scheduleIdleTask(callback, timeout = 1200) {
+  if (typeof window.requestIdleCallback === "function") {
+    return window.requestIdleCallback(() => callback(), { timeout });
+  }
+
+  return window.setTimeout(callback, 40);
+}
+
+function cancelIdleTask(handle) {
+  if (typeof window.cancelIdleCallback === "function") {
+    window.cancelIdleCallback(handle);
+    return;
+  }
+
+  clearTimeout(handle);
+}
+
+function getLocalPreloaderHost() {
+  let host = document.getElementById("assetPreloaderHost");
+  if (host) {
+    return host;
+  }
+
+  host = document.createElement("div");
+  host.id = "assetPreloaderHost";
+  host.setAttribute("aria-hidden", "true");
+  host.style.cssText = [
+    "position:fixed",
+    "left:-9999px",
+    "top:-9999px",
+    "width:1px",
+    "height:1px",
+    "overflow:hidden",
+    "pointer-events:none",
+    "opacity:0",
+  ].join(";");
+  document.body.appendChild(host);
+  return host;
+}
+
+function warmLocalAsset(assetUrl) {
+  if (preloadedAssetUrls.has(assetUrl)) {
+    return;
+  }
+
+  preloadedAssetUrls.add(assetUrl);
+
+  if (isImageAsset(assetUrl)) {
+    const img = new Image();
+    img.decoding = "async";
+    img.loading = "eager";
+    img.src = assetUrl;
+    return;
+  }
+
+  if (isVideoAsset(assetUrl)) {
+    const host = getLocalPreloaderHost();
+    const video = document.createElement("video");
+    let cleaned = false;
+
+    const cleanup = () => {
+      if (cleaned) {
+        return;
+      }
+
+      cleaned = true;
+      window.setTimeout(() => {
+        try {
+          video.removeAttribute("src");
+          video.load();
+          video.remove();
+        } catch {
+          // Ignore cleanup failures on local file contexts.
+        }
+      }, 3000);
+    };
+
+    video.preload = "auto";
+    video.muted = true;
+    video.playsInline = true;
+    video.src = assetUrl;
+    host.appendChild(video);
+    video.load();
+    video.addEventListener("loadeddata", cleanup, { once: true });
+    video.addEventListener("canplaythrough", cleanup, { once: true });
+    video.addEventListener("error", cleanup, { once: true });
+  }
+}
+
+function warmLocalAssets(assetUrls, { defer = true } = {}) {
+  const urls = uniqueAssets(assetUrls).filter((url) => !preloadedAssetUrls.has(url));
+  if (!urls.length) {
+    return;
+  }
+
+  const run = () => {
+    for (const assetUrl of urls) {
+      warmLocalAsset(assetUrl);
+    }
+  };
+
+  if (defer) {
+    scheduleIdleTask(run, 800);
+  } else {
+    run();
+  }
+}
+
+function queueServiceWorkerAssets(assetUrls) {
+  const urls = uniqueAssets(assetUrls);
+  if (!urls.length || !canUseServiceWorkerCache()) {
+    return false;
+  }
+
+  if (serviceWorkerReady && serviceWorkerRegistration?.active) {
+    serviceWorkerRegistration.active.postMessage({ type: "CACHE_ASSETS", assets: urls });
+  } else {
+    serviceWorkerQueue.push(urls);
+  }
+
+  return true;
+}
+
+function flushServiceWorkerQueue() {
+  if (!serviceWorkerReady || !serviceWorkerRegistration?.active || !serviceWorkerQueue.length) {
+    return;
+  }
+
+  const pending = serviceWorkerQueue.splice(0, serviceWorkerQueue.length);
+  for (const assets of pending) {
+    serviceWorkerRegistration.active.postMessage({ type: "CACHE_ASSETS", assets });
+  }
+}
+
+function primeAssetCache(assetUrls, { localFallback = false } = {}) {
+  const urls = uniqueAssets(assetUrls).filter((url) => !scheduledAssetUrls.has(url));
+  if (!urls.length) {
+    return;
+  }
+
+  for (const assetUrl of urls) {
+    scheduledAssetUrls.add(assetUrl);
+  }
+
+  if (localFallback || !canUseServiceWorkerCache()) {
+    warmLocalAssets(urls, { defer: !localFallback });
+  }
+
+  queueServiceWorkerAssets(urls);
+}
+
+function sceneAssetBundle(scene) {
+  const linkedScenes = (scene.choices ?? []).map((choice) => sceneById(choice.target));
+  return uniqueAssets([
+    scene.poster,
+    scene.video,
+    ...linkedScenes.map((item) => item.poster),
+    ...linkedScenes.map((item) => item.video),
+  ]);
+}
+
+function sceneImageBundle(scene) {
+  const linkedScenes = (scene.choices ?? []).map((choice) => sceneById(choice.target));
+  return uniqueAssets([
+    scene.poster,
+    ...roleImageAssets,
+    ...linkedScenes.map((item) => item.poster),
+  ]);
+}
+
+function sceneVideoBundle(scene) {
+  const linkedScenes = (scene.choices ?? []).map((choice) => sceneById(choice.target));
+  return uniqueAssets([
+    scene.video,
+    ...linkedScenes.map((item) => item.video),
+  ]);
+}
+
+function sceneChoiceVideoBundle(scene) {
+  const linkedScenes = (scene.choices ?? []).map((choice) => sceneById(choice.target));
+  return uniqueAssets(linkedScenes.map((item) => item.video));
+}
+
+function catalogPosterBundle() {
+  return uniqueAssets([...roleImageAssets, ...scenePosterAssets]);
+}
+
+function catalogVideoBundle() {
+  return uniqueAssets(sceneVideoAssets);
+}
+
+function clearAssetWarmTimer() {
+  if (!assetWarmTimer) {
+    return;
+  }
+
+  cancelIdleTask(assetWarmTimer);
+  assetWarmTimer = null;
+}
+
+function scheduleAssetWarmup(scene) {
+  clearAssetWarmTimer();
+  assetWarmTimer = scheduleIdleTask(() => {
+    primeAssetCache(sceneImageBundle(scene), { localFallback: !canUseServiceWorkerCache() });
+
+    if (!shouldAvoidHeavyCaching()) {
+      const futureVideos = sceneChoiceVideoBundle(scene);
+      if (futureVideos.length) {
+        warmLocalAssets(futureVideos, { defer: true });
+        primeAssetCache(futureVideos);
+      }
+    }
+  }, 1200);
+}
+
+async function registerAssetCacheWorker() {
+  if (!canUseServiceWorkerCache()) {
+    return null;
+  }
+
+  primeAssetCache(appShellAssets);
+
+  try {
+    const registration = await navigator.serviceWorker.register("./sw.js");
+    serviceWorkerRegistration = registration;
+
+    const readyRegistration = await navigator.serviceWorker.ready;
+    serviceWorkerRegistration = readyRegistration;
+    serviceWorkerReady = true;
+    flushServiceWorkerQueue();
+    return readyRegistration;
+  } catch {
+    serviceWorkerRegistration = null;
+    serviceWorkerReady = false;
+    return null;
+  }
 }
 
 function formatTime(seconds) {
@@ -792,6 +1070,7 @@ function syncScene(
   updateButtons();
   renderChoiceZone(scene);
   persistState();
+  scheduleAssetWarmup(scene);
 
   els.video.pause();
   els.video.poster = scene.poster;
@@ -1041,6 +1320,7 @@ function init() {
   restoreState();
   renderRoleGrid();
   bindEvents();
+  void registerAssetCacheWorker();
 
   const initialScene = sceneById(state.currentId);
 
