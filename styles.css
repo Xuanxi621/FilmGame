@@ -163,6 +163,58 @@ button:disabled {
   letter-spacing: 0;
 }
 
+.start-load {
+  width: min(480px, 100%);
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 18px;
+  background: rgba(8, 10, 14, 0.42);
+}
+
+.start-load-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+
+.start-load-label {
+  color: rgba(244, 239, 229, 0.86);
+}
+
+.start-load-count {
+  color: var(--accent);
+}
+
+.start-load-track {
+  width: 100%;
+  height: 9px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.start-load-fill {
+  display: block;
+  width: 0%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(var(--accent-rgb), 0.75), rgba(var(--accent-rgb), 1));
+  box-shadow: 0 0 18px rgba(var(--accent-rgb), 0.28);
+  transition: width 180ms ease;
+}
+
+.start-load-hint {
+  margin: 0;
+  color: rgba(244, 239, 229, 0.7);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .start-button {
   min-width: 180px;
   min-height: 48px;
@@ -193,6 +245,19 @@ button:disabled {
 .start-button:focus-visible {
   outline: 2px solid rgba(var(--accent-rgb), 0.85);
   outline-offset: 2px;
+}
+
+.start-button:disabled {
+  cursor: progress;
+  opacity: 0.68;
+  transform: none;
+  filter: grayscale(0.12);
+}
+
+.start-button:disabled:hover {
+  transform: none;
+  background: rgba(8, 10, 14, 0.72);
+  filter: grayscale(0.12);
 }
 
 .restart-fab {
@@ -952,6 +1017,15 @@ button:disabled {
 
   .start-copy h1 {
     font-size: 28px;
+  }
+
+  .start-load {
+    padding: 10px 12px 12px;
+    border-radius: 16px;
+  }
+
+  .start-load-head {
+    font-size: 11px;
   }
 
   .start-button {

@@ -19,7 +19,17 @@
         <div class="start-copy">
           <span class="start-kicker">第一视角</span>
           <h1>开始游戏</h1>
-          <button class="start-button" id="startGameBtn" type="button">开始游戏</button>
+          <div class="start-load" aria-live="polite">
+            <div class="start-load-head">
+              <span class="start-load-label" id="startLoadLabel">加载资源</span>
+              <span class="start-load-count" id="startLoadCount">0 / 0</span>
+            </div>
+            <div class="start-load-track" aria-hidden="true">
+              <span class="start-load-fill" id="startLoadFill"></span>
+            </div>
+            <p class="start-load-hint" id="startLoadHint">正在并行下载视频资源，封面会在后台预热。</p>
+          </div>
+          <button class="start-button" id="startGameBtn" type="button" disabled>开始游戏</button>
         </div>
       </section>
 

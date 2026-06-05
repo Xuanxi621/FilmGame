@@ -312,6 +312,7 @@ const preloadedAssetUrls = new Set();
 const scheduledAssetUrls = new Set();
 const mediaBlobCache = new Map();
 let assetWarmTimer = null;
+let startupResourcePromise = null;
 let serviceWorkerRegistration = null;
 let serviceWorkerReady = false;
 let serviceWorkerQueue = [];
@@ -326,6 +327,10 @@ const state = {
   playAfterLoad: false,
   startOpen: true,
   introOpen: true,
+  resourcesReady: false,
+  resourceTotal: 0,
+  resourceLoaded: 0,
+  resourceFailed: 0,
   visited: new Set(),
   route: [],
   stats: defaultStats(),
@@ -337,6 +342,10 @@ const els = {
   video: document.getElementById("sceneVideo"),
   startOverlay: document.getElementById("startOverlay"),
   startGameBtn: document.getElementById("startGameBtn"),
+  startLoadLabel: document.getElementById("startLoadLabel"),
+  startLoadCount: document.getElementById("startLoadCount"),
+  startLoadFill: document.getElementById("startLoadFill"),
+  startLoadHint: document.getElementById("startLoadHint"),
   introOverlay: document.getElementById("introOverlay"),
   roleGrid: document.getElementById("roleGrid"),
   roleChip: document.getElementById("roleChip"),
@@ -458,10 +467,6 @@ function shouldPrefetchVideos() {
   return !(typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse)").matches);
 }
 
-function shouldStreamVideoDirectly() {
-  return shouldAvoidHeavyCaching() || Boolean(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
-}
-
 async function fetchMediaBlob(assetUrl) {
   const resolvedUrl = resolveAssetUrl(assetUrl);
   const cached = mediaBlobCache.get(resolvedUrl);
@@ -514,18 +519,6 @@ function prepareSceneVideo(scene) {
     return;
   }
 
-  if (shouldStreamVideoDirectly()) {
-    const source = resolveAssetUrl(scene.video);
-    els.video.preload = "auto";
-
-    if (els.video.currentSrc !== source) {
-      els.video.src = source;
-      els.video.load();
-    }
-
-    return;
-  }
-
   warmMediaBlob(scene.video);
 }
 
@@ -535,6 +528,105 @@ async function resolveVideoSource(assetUrl) {
   } catch {
     return resolveAssetUrl(assetUrl);
   }
+}
+
+async function loadStartupVideoAsset(assetUrl) {
+  let lastError = null;
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      await fetchMediaBlob(assetUrl);
+      return true;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError ?? new Error(`Failed to preload video asset: ${assetUrl}`);
+}
+
+function updateStartupLoaderUI() {
+  const total = state.resourceTotal;
+  const finished = Math.min(total, state.resourceLoaded + state.resourceFailed);
+  const ratio = total > 0 ? finished / total : 0;
+  const ready = state.resourcesReady;
+
+  if (els.startLoadLabel) {
+    els.startLoadLabel.textContent = ready ? "资源已就绪" : "加载资源";
+  }
+
+  if (els.startLoadCount) {
+    els.startLoadCount.textContent = total > 0 ? `${finished} / ${total}` : "0 / 0";
+  }
+
+  if (els.startLoadFill) {
+    els.startLoadFill.style.width = `${Math.round(ratio * 100)}%`;
+  }
+
+  if (els.startLoadHint) {
+    if (!total) {
+      els.startLoadHint.textContent = "正在准备资源队列。";
+    } else if (ready) {
+      els.startLoadHint.textContent =
+        state.resourceFailed > 0
+          ? `视频已完成，${state.resourceFailed} 项未成功，封面在后台预热。`
+          : "视频资源已完成，封面在后台预热。";
+    } else {
+      els.startLoadHint.textContent = `正在并行下载 ${total} 个视频资源。`;
+    }
+  }
+
+  if (els.startGameBtn) {
+    els.startGameBtn.disabled = !ready;
+    els.startGameBtn.textContent = ready ? "开始游戏" : "加载中...";
+    els.startGameBtn.title = ready ? "开始游戏" : "资源加载中";
+    els.startGameBtn.setAttribute("aria-busy", String(!ready));
+  }
+
+  if (els.startOverlay) {
+    els.startOverlay.setAttribute("aria-busy", String(!ready));
+  }
+}
+
+async function bootStartupResources() {
+  if (startupResourcePromise) {
+    return startupResourcePromise;
+  }
+
+  const videoAssets = catalogVideoBundle();
+  state.resourceTotal = videoAssets.length;
+  state.resourceLoaded = 0;
+  state.resourceFailed = 0;
+  state.resourcesReady = false;
+  updateStartupLoaderUI();
+
+  startupResourcePromise = (async () => {
+    if (!videoAssets.length) {
+      state.resourcesReady = true;
+      updateStartupLoaderUI();
+      return;
+    }
+
+    const tasks = videoAssets.map(async (assetUrl) => {
+      try {
+        await loadStartupVideoAsset(assetUrl);
+        state.resourceLoaded += 1;
+      } catch {
+        state.resourceFailed += 1;
+      } finally {
+        updateStartupLoaderUI();
+      }
+    });
+
+    await Promise.allSettled(tasks);
+    state.resourcesReady = true;
+    updateStartupLoaderUI();
+
+    warmLocalAssets(catalogPosterBundle(), { defer: true });
+    primeAssetCache(catalogPosterBundle(), { localFallback: !canUseServiceWorkerCache() });
+  })();
+
+  return startupResourcePromise;
 }
 
 function waitForVideoReady(video) {
@@ -743,9 +835,7 @@ function clearAssetWarmTimer() {
 function scheduleAssetWarmup(scene) {
   clearAssetWarmTimer();
   assetWarmTimer = scheduleIdleTask(() => {
-    if (!shouldStreamVideoDirectly()) {
-      warmMediaBlob(scene.video);
-    }
+    warmMediaBlob(scene.video);
     primeAssetCache(sceneImageBundle(scene), { localFallback: !canUseServiceWorkerCache() });
 
     if (shouldPrefetchVideos()) {
@@ -1055,6 +1145,9 @@ function updateButtons() {
   els.nextBtn.disabled = !interactiveScene;
   els.autoBtn.disabled = !Boolean(role) || state.introOpen;
   els.restartBtn.disabled = false;
+  if (els.startGameBtn) {
+    els.startGameBtn.disabled = !state.resourcesReady;
+  }
 
   els.playBtn.title = locked ? "先选择角色" : state.playing ? "暂停" : "播放";
   els.prevBtn.title = !interactiveScene ? "先选择角色" : "上一幕";
@@ -1176,10 +1269,8 @@ function syncScene(
   updateButtons();
   renderChoiceZone(scene);
   persistState();
-  if (state.roleId && !state.introOpen) {
-    if (!shouldStreamVideoDirectly()) {
-      warmMediaBlob(scene.video);
-    }
+  if (state.roleId && !state.introOpen && state.resourcesReady) {
+    warmMediaBlob(scene.video);
     scheduleAssetWarmup(scene);
   }
 
@@ -1204,8 +1295,7 @@ async function playVideo() {
   }
 
   const scene = sceneById(state.currentId);
-  const useStreamingSource = shouldStreamVideoDirectly();
-  const source = useStreamingSource ? resolveAssetUrl(scene.video) : await resolveVideoSource(scene.video);
+  const source = await resolveVideoSource(scene.video);
 
   if (els.video.currentSrc !== source) {
     els.video.src = source;
@@ -1216,9 +1306,7 @@ async function playVideo() {
   els.video.volume = 1;
 
   try {
-    if (!useStreamingSource) {
-      await waitForVideoReady(els.video);
-    }
+    await waitForVideoReady(els.video);
     await els.video.play();
   } catch {
     showGate(true);
@@ -1285,7 +1373,6 @@ function beginStory(roleId, { autoplay = true, forceSound = false, playImmediate
   syncScene(initialScene, {
     autoplay,
     source: "start",
-    retainVideoSource: shouldStreamVideoDirectly(),
   });
   prepareSceneVideo(initialScene);
   showIntro(false);
@@ -1302,6 +1389,10 @@ function selectRole(roleId) {
 }
 
 function openIntro() {
+  if (!state.resourcesReady) {
+    return;
+  }
+
   showIntro(true);
   updateButtons();
   persistState();
@@ -1330,7 +1421,6 @@ function restartStory() {
     preserveRoute: true,
     loadVideo: false,
     loadPoster: true,
-    retainVideoSource: shouldStreamVideoDirectly(),
   });
   prepareSceneVideo(sceneById("01"));
   updateButtons();
@@ -1462,6 +1552,7 @@ function init() {
   renderRoleGrid();
   bindEvents();
   void registerAssetCacheWorker();
+  void bootStartupResources();
 
   const initialScene = sceneById(state.currentId);
 
@@ -1504,7 +1595,6 @@ function init() {
     preserveRoute: true,
     loadVideo: false,
     loadPoster: true,
-    retainVideoSource: shouldStreamVideoDirectly(),
   });
   prepareSceneVideo(sceneById("01"));
   updateButtons();
