@@ -310,6 +310,7 @@ const scenePosterAssets = scenes.map((scene) => scene.poster);
 const sceneVideoAssets = scenes.map((scene) => scene.video);
 const preloadedAssetUrls = new Set();
 const scheduledAssetUrls = new Set();
+const mediaBlobCache = new Map();
 let assetWarmTimer = null;
 let serviceWorkerRegistration = null;
 let serviceWorkerReady = false;
@@ -323,6 +324,7 @@ const state = {
   auto: false,
   awaitingChoice: false,
   playAfterLoad: false,
+  startOpen: true,
   introOpen: true,
   visited: new Set(),
   route: [],
@@ -333,6 +335,8 @@ const state = {
 const els = {
   app: document.getElementById("app"),
   video: document.getElementById("sceneVideo"),
+  startOverlay: document.getElementById("startOverlay"),
+  startGameBtn: document.getElementById("startGameBtn"),
   introOverlay: document.getElementById("introOverlay"),
   roleGrid: document.getElementById("roleGrid"),
   roleChip: document.getElementById("roleChip"),
@@ -454,6 +458,89 @@ function shouldPrefetchVideos() {
   return !(typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse)").matches);
 }
 
+async function fetchMediaBlob(assetUrl) {
+  const resolvedUrl = resolveAssetUrl(assetUrl);
+  const cached = mediaBlobCache.get(resolvedUrl);
+  if (cached?.objectUrl) {
+    return cached.objectUrl;
+  }
+
+  if (cached?.promise) {
+    return cached.promise;
+  }
+
+  const promise = (async () => {
+    const response = await fetch(resolvedUrl, {
+      cache: "force-cache",
+      credentials: "same-origin",
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch media asset: ${resolvedUrl}`);
+    }
+
+    const blob = await response.blob();
+    return URL.createObjectURL(blob);
+  })();
+
+  mediaBlobCache.set(resolvedUrl, { promise });
+
+  try {
+    const objectUrl = await promise;
+    mediaBlobCache.set(resolvedUrl, { objectUrl });
+    return objectUrl;
+  } catch (error) {
+    mediaBlobCache.delete(resolvedUrl);
+    throw error;
+  }
+}
+
+function warmMediaBlob(assetUrl) {
+  if (!isVideoAsset(assetUrl)) {
+    return;
+  }
+
+  void fetchMediaBlob(assetUrl).catch(() => {
+    // Fall back to the network source if the blob cache fails.
+  });
+}
+
+async function resolveVideoSource(assetUrl) {
+  try {
+    return await fetchMediaBlob(assetUrl);
+  } catch {
+    return resolveAssetUrl(assetUrl);
+  }
+}
+
+function waitForVideoReady(video) {
+  if (video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      video.removeEventListener("canplay", onReady);
+      video.removeEventListener("canplaythrough", onReady);
+      video.removeEventListener("error", onError);
+    };
+
+    const onReady = () => {
+      cleanup();
+      resolve();
+    };
+
+    const onError = () => {
+      cleanup();
+      reject(new Error("video_failed_to_buffer"));
+    };
+
+    video.addEventListener("canplay", onReady, { once: true });
+    video.addEventListener("canplaythrough", onReady, { once: true });
+    video.addEventListener("error", onError, { once: true });
+  });
+}
+
 function canUseServiceWorkerCache() {
   return "serviceWorker" in navigator && window.isSecureContext && location.protocol !== "file:";
 }
@@ -514,36 +601,7 @@ function warmLocalAsset(assetUrl) {
   }
 
   if (isVideoAsset(assetUrl)) {
-    const host = getLocalPreloaderHost();
-    const video = document.createElement("video");
-    let cleaned = false;
-
-    const cleanup = () => {
-      if (cleaned) {
-        return;
-      }
-
-      cleaned = true;
-      window.setTimeout(() => {
-        try {
-          video.removeAttribute("src");
-          video.load();
-          video.remove();
-        } catch {
-          // Ignore cleanup failures on local file contexts.
-        }
-      }, 3000);
-    };
-
-    video.preload = "auto";
-    video.muted = true;
-    video.playsInline = true;
-    video.src = assetUrl;
-    host.appendChild(video);
-    video.load();
-    video.addEventListener("loadeddata", cleanup, { once: true });
-    video.addEventListener("canplaythrough", cleanup, { once: true });
-    video.addEventListener("error", cleanup, { once: true });
+    warmMediaBlob(assetUrl);
   }
 }
 
@@ -567,7 +625,7 @@ function warmLocalAssets(assetUrls, { defer = true } = {}) {
 }
 
 function queueServiceWorkerAssets(assetUrls) {
-  const urls = uniqueAssets(assetUrls);
+  const urls = uniqueAssets(assetUrls).filter((url) => !isVideoAsset(url));
   if (!urls.length || !canUseServiceWorkerCache()) {
     return false;
   }
@@ -661,6 +719,7 @@ function clearAssetWarmTimer() {
 function scheduleAssetWarmup(scene) {
   clearAssetWarmTimer();
   assetWarmTimer = scheduleIdleTask(() => {
+    warmMediaBlob(scene.video);
     primeAssetCache(sceneImageBundle(scene), { localFallback: !canUseServiceWorkerCache() });
 
     if (shouldPrefetchVideos()) {
@@ -751,7 +810,6 @@ function persistState() {
   const payload = {
     currentId: state.currentId,
     roleId: state.roleId,
-    auto: state.auto,
     awaitingChoice: state.awaitingChoice,
     visited: [...state.visited],
     route: state.route,
@@ -782,9 +840,6 @@ function restoreState() {
     }
     if (saved.roleId && roleById(saved.roleId)) {
       state.roleId = saved.roleId;
-    }
-    if (typeof saved.auto === "boolean") {
-      state.auto = saved.auto;
     }
     if (typeof saved.awaitingChoice === "boolean") {
       state.awaitingChoice = saved.awaitingChoice;
@@ -849,6 +904,8 @@ function updateTheme(scene) {
     document.documentElement.style.setProperty("--role-accent", role.accent);
     document.documentElement.style.setProperty("--role-accent-rgb", role.accentRgb);
     document.title = `${role.name}视角 · ${scene.title} · 一分钟短剧互动影游`;
+  } else if (state.startOpen) {
+    document.title = `开始游戏 · 一分钟短剧互动影游`;
   } else {
     document.title = `选择角色 · 一分钟短剧互动影游`;
   }
@@ -864,15 +921,21 @@ function applyRoleProfile(role) {
 }
 
 function syncAppMode() {
-  const introVisible = state.introOpen || !state.roleId;
+  const startVisible = state.startOpen && !state.roleId;
+  const introVisible = !startVisible && (state.introOpen || !state.roleId);
+  const gameVisible = Boolean(state.roleId) && !startVisible && !introVisible;
+
+  els.app.classList.toggle("is-start", startVisible);
   els.app.classList.toggle("is-intro", introVisible);
+  els.startOverlay.classList.toggle("is-visible", startVisible);
   els.introOverlay.classList.toggle("is-visible", introVisible);
-  els.storyCard.classList.toggle("is-visible", Boolean(state.roleId) && !introVisible);
+  els.storyCard.classList.toggle("is-visible", gameVisible);
 }
 
 function showIntro(show) {
   state.introOpen = show;
   if (show) {
+    state.startOpen = false;
     state.awaitingChoice = false;
     clearAutoChoiceTimer();
     els.choiceZone.innerHTML = "";
@@ -965,13 +1028,13 @@ function updateButtons() {
   els.prevBtn.disabled = !interactiveScene;
   els.nextBtn.disabled = !interactiveScene;
   els.autoBtn.disabled = !Boolean(role) || state.introOpen;
-  els.restartBtn.disabled = !Boolean(role) || state.introOpen;
+  els.restartBtn.disabled = false;
 
   els.playBtn.title = locked ? "先选择角色" : state.playing ? "暂停" : "播放";
   els.prevBtn.title = !interactiveScene ? "先选择角色" : "上一幕";
   els.nextBtn.title = !interactiveScene ? "先选择角色" : "下一幕";
   els.autoBtn.title = !Boolean(role) || state.introOpen ? "先选择角色" : state.auto ? "自动：开" : "自动：关";
-  els.restartBtn.title = !Boolean(role) || state.introOpen ? "先选择角色" : "重播";
+  els.restartBtn.title = "重新开始";
   els.muteBtn.title = state.muted ? "静音" : "有声";
   els.roleChip.title = role ? "重新选择角色" : "选择角色";
   els.roleChip.classList.toggle("ghost", !role);
@@ -1061,7 +1124,7 @@ function syncScene(
   clearAutoChoiceTimer();
   state.currentId = scene.id;
   state.awaitingChoice = false;
-  state.playAfterLoad = autoplay && loadVideo;
+  state.playAfterLoad = false;
 
   if (fromChoice && choice) {
     applyChoiceEffects(choice);
@@ -1087,6 +1150,7 @@ function syncScene(
   renderChoiceZone(scene);
   persistState();
   if (state.roleId && !state.introOpen) {
+    warmMediaBlob(scene.video);
     scheduleAssetWarmup(scene);
   }
 
@@ -1098,13 +1162,8 @@ function syncScene(
   }
   els.video.muted = state.muted;
   els.video.volume = 1;
-  if (loadVideo) {
-    els.video.src = scene.video;
-    els.video.load();
-  } else {
-    els.video.removeAttribute("src");
-    els.video.load();
-  }
+  els.video.removeAttribute("src");
+  els.video.load();
   showGate(false);
 }
 
@@ -1113,11 +1172,19 @@ async function playVideo() {
     return;
   }
 
-  state.playAfterLoad = false;
+  const scene = sceneById(state.currentId);
+  const source = await resolveVideoSource(scene.video);
+
+  if (els.video.currentSrc !== source) {
+    els.video.src = source;
+    els.video.load();
+  }
+
   els.video.muted = state.muted;
   els.video.volume = 1;
 
   try {
+    await waitForVideoReady(els.video);
     await els.video.play();
   } catch {
     showGate(true);
@@ -1165,6 +1232,7 @@ function beginStory(roleId, { autoplay = true, forceSound = false, playImmediate
   }
 
   clearAutoChoiceTimer();
+  state.startOpen = false;
   state.roleId = role.id;
   state.introOpen = false;
   state.awaitingChoice = false;
@@ -1195,30 +1263,37 @@ function selectRole(roleId) {
 }
 
 function openIntro() {
-  if (!state.roleId) {
-    state.introOpen = true;
-    showIntro(true);
-    updateButtons();
-    persistState();
-    return;
-  }
-
-  clearAutoChoiceTimer();
-  state.introOpen = true;
-  state.playing = false;
-  els.video.pause();
   showIntro(true);
   updateButtons();
   persistState();
 }
 
 function restartStory() {
-  if (!state.roleId) {
-    openIntro();
-    return;
-  }
+  clearAutoChoiceTimer();
+  state.auto = false;
+  state.startOpen = true;
+  state.roleId = null;
+  state.introOpen = false;
+  state.awaitingChoice = false;
+  state.playing = false;
+  state.currentId = "01";
+  state.visited = new Set();
+  state.route = [];
+  state.stats = defaultStats();
 
-  beginStory(state.roleId, { autoplay: true, forceSound: false, playImmediately: true });
+  els.video.pause();
+  els.choiceZone.innerHTML = "";
+  els.choiceZone.classList.remove("is-visible");
+
+  syncScene(sceneById("01"), {
+    autoplay: false,
+    source: "start",
+    preserveRoute: true,
+    loadVideo: false,
+    loadPoster: true,
+  });
+  updateButtons();
+  persistState();
 }
 
 function stepScene(direction) {
@@ -1264,6 +1339,7 @@ function goToScene(sceneId, options = {}) {
 }
 
 function bindEvents() {
+  els.startGameBtn.addEventListener("click", openIntro);
   els.roleChip.addEventListener("click", openIntro);
 
   els.playGate.addEventListener("click", () => {
@@ -1286,9 +1362,6 @@ function bindEvents() {
   els.video.addEventListener("loadedmetadata", updateProgress);
   els.video.addEventListener("loadeddata", () => {
     updateProgress();
-    if (state.playAfterLoad && state.roleId && !state.introOpen && !state.awaitingChoice) {
-      void playVideo();
-    }
   });
   els.video.addEventListener("play", () => {
     state.playing = true;
@@ -1364,6 +1437,7 @@ function init() {
 
   if (state.roleId) {
     applyRoleProfile(roleById(state.roleId));
+    state.startOpen = false;
     state.introOpen = false;
     syncScene(initialScene, {
       autoplay: !state.awaitingChoice,
@@ -1381,13 +1455,15 @@ function init() {
     return;
   }
 
+  state.startOpen = true;
+  state.introOpen = false;
   syncScene(sceneById("01"), {
     autoplay: false,
     source: "start",
+    preserveRoute: true,
     loadVideo: false,
-    loadPoster: false,
+    loadPoster: true,
   });
-  showIntro(true);
   updateButtons();
   showGate(false);
 }

@@ -128,12 +128,16 @@ self.addEventListener("fetch", (event) => {
   }
 
   const destination = request.destination;
+  if (destination === "video" || destination === "audio") {
+    return;
+  }
+
   if (destination === "script" || destination === "style") {
     event.respondWith(networkFirst(request, SHELL_CACHE));
     return;
   }
 
-  if (destination === "image" || destination === "video" || destination === "audio" || destination === "font") {
+  if (destination === "image" || destination === "font") {
     event.respondWith(cacheFirst(request, ASSET_CACHE));
     return;
   }

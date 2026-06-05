@@ -9,11 +9,21 @@
   </head>
   <body>
     <main class="app" id="app">
-      <video id="sceneVideo" class="scene-video" playsinline preload="metadata"></video>
+      <video id="sceneVideo" class="scene-video" playsinline preload="none"></video>
 
       <div class="veil" aria-hidden="true"></div>
 
-      <section class="intro-overlay is-visible" id="introOverlay" aria-label="角色选择">
+      <button class="icon-btn restart-fab" id="restartBtn" type="button" title="重新开始" aria-label="重新开始"></button>
+
+      <section class="start-overlay is-visible" id="startOverlay" aria-label="开始游戏">
+        <div class="start-copy">
+          <span class="start-kicker">第一视角</span>
+          <h1>开始游戏</h1>
+          <button class="start-button" id="startGameBtn" type="button">开始游戏</button>
+        </div>
+      </section>
+
+      <section class="intro-overlay" id="introOverlay" aria-label="角色选择">
         <div class="intro-copy">
           <span class="intro-kicker">第一视角</span>
           <h1>先选角色，再直接带声进入</h1>
@@ -37,7 +47,6 @@
           <button class="icon-btn" id="playBtn" type="button" title="播放" aria-label="播放"></button>
           <button class="icon-btn" id="muteBtn" type="button" title="静音" aria-label="静音"></button>
           <button class="icon-btn" id="autoBtn" type="button" title="自动" aria-label="自动"></button>
-          <button class="icon-btn" id="restartBtn" type="button" title="重播" aria-label="重播"></button>
           <button class="icon-btn" id="nextBtn" type="button" title="下一幕" aria-label="下一幕"></button>
         </div>
 
