@@ -458,6 +458,10 @@ function shouldPrefetchVideos() {
   return !(typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse)").matches);
 }
 
+function shouldStreamVideoDirectly() {
+  return shouldAvoidHeavyCaching() || Boolean(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
+}
+
 async function fetchMediaBlob(assetUrl) {
   const resolvedUrl = resolveAssetUrl(assetUrl);
   const cached = mediaBlobCache.get(resolvedUrl);
@@ -503,6 +507,26 @@ function warmMediaBlob(assetUrl) {
   void fetchMediaBlob(assetUrl).catch(() => {
     // Fall back to the network source if the blob cache fails.
   });
+}
+
+function prepareSceneVideo(scene) {
+  if (!scene?.video) {
+    return;
+  }
+
+  if (shouldStreamVideoDirectly()) {
+    const source = resolveAssetUrl(scene.video);
+    els.video.preload = "auto";
+
+    if (els.video.currentSrc !== source) {
+      els.video.src = source;
+      els.video.load();
+    }
+
+    return;
+  }
+
+  warmMediaBlob(scene.video);
 }
 
 async function resolveVideoSource(assetUrl) {
@@ -719,7 +743,9 @@ function clearAssetWarmTimer() {
 function scheduleAssetWarmup(scene) {
   clearAssetWarmTimer();
   assetWarmTimer = scheduleIdleTask(() => {
-    warmMediaBlob(scene.video);
+    if (!shouldStreamVideoDirectly()) {
+      warmMediaBlob(scene.video);
+    }
     primeAssetCache(sceneImageBundle(scene), { localFallback: !canUseServiceWorkerCache() });
 
     if (shouldPrefetchVideos()) {
@@ -1119,6 +1145,7 @@ function syncScene(
     preserveRoute = false,
     loadVideo = true,
     loadPoster = true,
+    retainVideoSource = false,
   } = {},
 ) {
   clearAutoChoiceTimer();
@@ -1150,7 +1177,9 @@ function syncScene(
   renderChoiceZone(scene);
   persistState();
   if (state.roleId && !state.introOpen) {
-    warmMediaBlob(scene.video);
+    if (!shouldStreamVideoDirectly()) {
+      warmMediaBlob(scene.video);
+    }
     scheduleAssetWarmup(scene);
   }
 
@@ -1162,8 +1191,10 @@ function syncScene(
   }
   els.video.muted = state.muted;
   els.video.volume = 1;
-  els.video.removeAttribute("src");
-  els.video.load();
+  if (!retainVideoSource) {
+    els.video.removeAttribute("src");
+    els.video.load();
+  }
   showGate(false);
 }
 
@@ -1173,7 +1204,8 @@ async function playVideo() {
   }
 
   const scene = sceneById(state.currentId);
-  const source = await resolveVideoSource(scene.video);
+  const useStreamingSource = shouldStreamVideoDirectly();
+  const source = useStreamingSource ? resolveAssetUrl(scene.video) : await resolveVideoSource(scene.video);
 
   if (els.video.currentSrc !== source) {
     els.video.src = source;
@@ -1184,7 +1216,9 @@ async function playVideo() {
   els.video.volume = 1;
 
   try {
-    await waitForVideoReady(els.video);
+    if (!useStreamingSource) {
+      await waitForVideoReady(els.video);
+    }
     await els.video.play();
   } catch {
     showGate(true);
@@ -1248,7 +1282,12 @@ function beginStory(roleId, { autoplay = true, forceSound = false, playImmediate
   applyRoleProfile(role);
   syncAppMode();
   const initialScene = sceneById("01");
-  syncScene(initialScene, { autoplay, source: "start" });
+  syncScene(initialScene, {
+    autoplay,
+    source: "start",
+    retainVideoSource: shouldStreamVideoDirectly(),
+  });
+  prepareSceneVideo(initialScene);
   showIntro(false);
   updateButtons();
   persistState();
@@ -1291,7 +1330,9 @@ function restartStory() {
     preserveRoute: true,
     loadVideo: false,
     loadPoster: true,
+    retainVideoSource: shouldStreamVideoDirectly(),
   });
+  prepareSceneVideo(sceneById("01"));
   updateButtons();
   persistState();
 }
@@ -1463,7 +1504,9 @@ function init() {
     preserveRoute: true,
     loadVideo: false,
     loadPoster: true,
+    retainVideoSource: shouldStreamVideoDirectly(),
   });
+  prepareSceneVideo(sceneById("01"));
   updateButtons();
   showGate(false);
 }
