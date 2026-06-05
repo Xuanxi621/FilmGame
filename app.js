@@ -352,6 +352,11 @@ const els = {
   playGate: document.getElementById("playGate"),
 };
 
+function syncViewportHeight() {
+  const height = window.visualViewport?.height ?? window.innerHeight;
+  document.documentElement.style.setProperty("--app-height", `${Math.round(height)}px`);
+}
+
 const icons = {
   play: `
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l11-6.5-11-6.5z"></path></svg>
@@ -1024,10 +1029,15 @@ function bindEvents() {
     }
   });
 
+  window.addEventListener("resize", syncViewportHeight);
+  window.addEventListener("orientationchange", syncViewportHeight);
+  window.visualViewport?.addEventListener("resize", syncViewportHeight);
+
   window.addEventListener("beforeunload", persistState);
 }
 
 function init() {
+  syncViewportHeight();
   restoreState();
   renderRoleGrid();
   bindEvents();
