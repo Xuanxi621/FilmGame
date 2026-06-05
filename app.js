@@ -8,7 +8,7 @@ const roles = [
     brief: "先看清，再推进。",
     voice: "你会把细节、路线和可疑点先记下来。",
     tags: ["观察", "记路", "线索"],
-    image: "./resources/小新.png",
+    image: "./resources/小新.webp",
     accent: "#79b36f",
     accentRgb: "121 179 111",
   },
@@ -21,7 +21,7 @@ const roles = [
     brief: "先跟上，再判断。",
     voice: "你会先追上变化，再决定下一步怎么走。",
     tags: ["反应", "追踪", "判断"],
-    image: "./resources/小彻.png",
+    image: "./resources/小彻.webp",
     accent: "#6f97e8",
     accentRgb: "111 151 232",
   },
@@ -36,7 +36,7 @@ const scenes = [
     summary: "你和同伴沿着河岸前进，第一枚线索正躲在水面反光里。",
     caption: "天色还亮着，但前方的水声已经开始变得陌生。",
     video: "./resources/1.mp4",
-    poster: "./resources/1.png",
+    poster: "./resources/1.webp",
     duration: 5.04,
     accent: "#f2b35d",
     accentRgb: "242 179 93",
@@ -63,7 +63,7 @@ const scenes = [
     summary: "一艘老旧船体从雾里浮出来，甲板和舷窗都在提醒你别漏掉细节。",
     caption: "铁锈、汽笛和潮气一起涌上来。",
     video: "./resources/2.mp4",
-    poster: "./resources/2.png",
+    poster: "./resources/2.webp",
     duration: 5.06,
     accent: "#67b7db",
     accentRgb: "103 183 219",
@@ -90,7 +90,7 @@ const scenes = [
     summary: "你被带进更窄的水道，速度一下子提起来，想停都停不住。",
     caption: "越往里走，回头的声音越小。",
     video: "./resources/3.mp4",
-    poster: "./resources/3.png",
+    poster: "./resources/3.webp",
     duration: 5.06,
     accent: "#6fa7ff",
     accentRgb: "111 167 255",
@@ -117,7 +117,7 @@ const scenes = [
     summary: "你藏在舱门边，透过门缝盯着船内的动作，里面显然不只一条路。",
     caption: "别出声，先把人和路线记下来。",
     video: "./resources/4.mp4",
-    poster: "./resources/4.png",
+    poster: "./resources/4.webp",
     duration: 7.06,
     accent: "#c38d5f",
     accentRgb: "195 141 95",
@@ -144,7 +144,7 @@ const scenes = [
     summary: "木箱、铁管和蒸汽把空间挤得只剩一条缝，你只能贴着阴影前进。",
     caption: "这艘船把秘密装得很满。",
     video: "./resources/5.mp4",
-    poster: "./resources/5.png",
+    poster: "./resources/5.webp",
     duration: 8.08,
     accent: "#df7e4c",
     accentRgb: "223 126 76",
@@ -171,7 +171,7 @@ const scenes = [
     summary: "舱内的火光突然亮起来，所有人的位置都被照清了，你也躲不下去。",
     caption: "现在是选择站哪边的时候。",
     video: "./resources/6.mp4",
-    poster: "./resources/6.png",
+    poster: "./resources/6.webp",
     duration: 8.06,
     accent: "#ff7a5c",
     accentRgb: "255 122 92",
@@ -198,7 +198,7 @@ const scenes = [
     summary: "你在岸边短暂停下，呼吸重新跟上，前方却藏着下一段更危险的水面。",
     caption: "停顿不是结束，只是换一口气。",
     video: "./resources/7.mp4",
-    poster: "./resources/7.png",
+    poster: "./resources/7.webp",
     duration: 7.08,
     accent: "#88b89f",
     accentRgb: "136 184 159",
@@ -225,7 +225,7 @@ const scenes = [
     summary: "你再次被卷进暗流，周围的声音开始变形，速度快到只能凭直觉判断。",
     caption: "别犹豫，先抓住最近的边缘。",
     video: "./resources/8.mp4",
-    poster: "./resources/8.png",
+    poster: "./resources/8.webp",
     duration: 5.06,
     accent: "#4da2d7",
     accentRgb: "77 162 215",
@@ -252,7 +252,7 @@ const scenes = [
     summary: "炉膛和金属管道把声音一层层放大，所有脚步都像在回音里被重复。",
     caption: "这片空间里，连呼吸都像有重量。",
     video: "./resources/9.mp4",
-    poster: "./resources/9.png",
+    poster: "./resources/9.webp",
     duration: 5.09,
     accent: "#d19a58",
     accentRgb: "209 154 88",
@@ -279,7 +279,7 @@ const scenes = [
     summary: "雾气和浪头一起散开，巨大的船影在远处定住，像一切故事的终点。",
     caption: "你终于看见整段旅程的轮廓。",
     video: "./resources/10.mp4",
-    poster: "./resources/10.png",
+    poster: "./resources/10.webp",
     duration: 5.09,
     accent: "#f0b34f",
     accentRgb: "240 179 79",
@@ -444,6 +444,14 @@ function shouldAvoidHeavyCaching() {
   const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
   const effectiveType = connection?.effectiveType ?? "";
   return Boolean(connection?.saveData) || /(^|[^a-z])(2g|slow-2g)($|[^a-z])/i.test(effectiveType);
+}
+
+function shouldPrefetchVideos() {
+  if (shouldAvoidHeavyCaching()) {
+    return false;
+  }
+
+  return !(typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse)").matches);
 }
 
 function canUseServiceWorkerCache() {
@@ -655,7 +663,7 @@ function scheduleAssetWarmup(scene) {
   assetWarmTimer = scheduleIdleTask(() => {
     primeAssetCache(sceneImageBundle(scene), { localFallback: !canUseServiceWorkerCache() });
 
-    if (!shouldAvoidHeavyCaching()) {
+    if (shouldPrefetchVideos()) {
       const futureVideos = sceneChoiceVideoBundle(scene);
       if (futureVideos.length) {
         warmLocalAssets(futureVideos, { defer: true });
@@ -806,7 +814,7 @@ function renderRoleGrid() {
       return `
         <button class="role-card" type="button" data-role="${role.id}" aria-label="选择 ${role.name}">
           <div class="role-media">
-            <img src="${role.image}" alt="${role.name}" loading="eager" />
+            <img src="${role.image}" alt="${role.name}" loading="eager" decoding="async" fetchpriority="high" />
             <div class="role-badge">${badge}</div>
           </div>
           <div class="role-body">
@@ -1004,7 +1012,7 @@ function renderChoiceZone(scene) {
             </div>
           </div>
           <div class="choice-thumb">
-            <img src="${target.poster}" alt="${target.title}" loading="lazy" />
+            <img src="${target.poster}" alt="${target.title}" loading="lazy" decoding="async" fetchpriority="low" />
           </div>
         </button>
       `;
@@ -1040,12 +1048,20 @@ function pushRoute(sceneId, source, label = "") {
 
 function syncScene(
   scene,
-  { autoplay = true, source = "jump", fromChoice = false, choice = null, preserveRoute = false } = {},
+  {
+    autoplay = true,
+    source = "jump",
+    fromChoice = false,
+    choice = null,
+    preserveRoute = false,
+    loadVideo = true,
+    loadPoster = true,
+  } = {},
 ) {
   clearAutoChoiceTimer();
   state.currentId = scene.id;
   state.awaitingChoice = false;
-  state.playAfterLoad = autoplay;
+  state.playAfterLoad = autoplay && loadVideo;
 
   if (fromChoice && choice) {
     applyChoiceEffects(choice);
@@ -1070,14 +1086,25 @@ function syncScene(
   updateButtons();
   renderChoiceZone(scene);
   persistState();
-  scheduleAssetWarmup(scene);
+  if (state.roleId && !state.introOpen) {
+    scheduleAssetWarmup(scene);
+  }
 
   els.video.pause();
-  els.video.poster = scene.poster;
+  if (loadPoster) {
+    els.video.poster = scene.poster;
+  } else {
+    els.video.removeAttribute("poster");
+  }
   els.video.muted = state.muted;
   els.video.volume = 1;
-  els.video.src = scene.video;
-  els.video.load();
+  if (loadVideo) {
+    els.video.src = scene.video;
+    els.video.load();
+  } else {
+    els.video.removeAttribute("src");
+    els.video.load();
+  }
   showGate(false);
 }
 
@@ -1354,7 +1381,12 @@ function init() {
     return;
   }
 
-  syncScene(sceneById("01"), { autoplay: false, source: "start" });
+  syncScene(sceneById("01"), {
+    autoplay: false,
+    source: "start",
+    loadVideo: false,
+    loadPoster: false,
+  });
   showIntro(true);
   updateButtons();
   showGate(false);

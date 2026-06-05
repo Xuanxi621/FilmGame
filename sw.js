@@ -60,8 +60,6 @@ async function cacheAssets(assetUrls) {
     return;
   }
 
-  const cache = await caches.open(ASSET_CACHE);
-
   for (const assetUrl of assetUrls) {
     if (typeof assetUrl !== "string" || !assetUrl) {
       continue;
