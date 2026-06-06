@@ -331,6 +331,7 @@ const state = {
   resourceTotal: 0,
   resourceLoaded: 0,
   resourceFailed: 0,
+  backgroundVideoTotal: 0,
   visited: new Set(),
   route: [],
   stats: defaultStats(),
@@ -569,10 +570,12 @@ function updateStartupLoaderUI() {
     } else if (ready) {
       els.startLoadHint.textContent =
         state.resourceFailed > 0
-          ? `视频已完成，${state.resourceFailed} 项未成功，封面在后台预热。`
-          : "视频资源已完成，封面在后台预热。";
+          ? `首镜资源已就绪，${state.resourceFailed} 个视频没有提前缓存，播放时会按需加载。`
+          : state.backgroundVideoTotal > 0
+            ? `首镜资源已就绪，后台继续预热 ${state.backgroundVideoTotal} 段视频和封面。`
+            : "首镜资源已就绪。";
     } else {
-      els.startLoadHint.textContent = `正在并行下载 ${total} 个视频资源。`;
+      els.startLoadHint.textContent = `正在优先加载首镜和分支视频，共 ${total} 个。`;
     }
   }
 
@@ -593,21 +596,24 @@ async function bootStartupResources() {
     return startupResourcePromise;
   }
 
-  const videoAssets = catalogVideoBundle();
-  state.resourceTotal = videoAssets.length;
+  const launchVideoAssets = startupLaunchVideoBundle();
+  const backgroundVideoAssets = startupBackgroundVideoBundle();
+  const backgroundVisualAssets = startupBackgroundVisualBundle();
+  state.resourceTotal = launchVideoAssets.length;
   state.resourceLoaded = 0;
   state.resourceFailed = 0;
+  state.backgroundVideoTotal = backgroundVideoAssets.length;
   state.resourcesReady = false;
   updateStartupLoaderUI();
 
   startupResourcePromise = (async () => {
-    if (!videoAssets.length) {
+    if (!launchVideoAssets.length) {
       state.resourcesReady = true;
       updateStartupLoaderUI();
       return;
     }
 
-    const tasks = videoAssets.map(async (assetUrl) => {
+    const tasks = launchVideoAssets.map(async (assetUrl) => {
       try {
         await loadStartupVideoAsset(assetUrl);
         state.resourceLoaded += 1;
@@ -622,8 +628,10 @@ async function bootStartupResources() {
     state.resourcesReady = true;
     updateStartupLoaderUI();
 
-    warmLocalAssets(catalogPosterBundle(), { defer: true });
-    primeAssetCache(catalogPosterBundle(), { localFallback: !canUseServiceWorkerCache() });
+    scheduleIdleTask(() => {
+      void warmVideoAssetsSequentially(backgroundVideoAssets);
+      primeAssetCache(backgroundVisualAssets, { localFallback: !canUseServiceWorkerCache() });
+    }, 1200);
   })();
 
   return startupResourcePromise;
@@ -821,6 +829,30 @@ function catalogPosterBundle() {
 
 function catalogVideoBundle() {
   return uniqueAssets(sceneVideoAssets);
+}
+
+function startupLaunchVideoBundle() {
+  const introScene = sceneById("01");
+  return uniqueAssets([introScene.video, ...sceneChoiceVideoBundle(introScene)]);
+}
+
+function startupBackgroundVideoBundle() {
+  const launchAssets = new Set(startupLaunchVideoBundle());
+  return uniqueAssets(catalogVideoBundle().filter((assetUrl) => !launchAssets.has(assetUrl)));
+}
+
+function startupBackgroundVisualBundle() {
+  return uniqueAssets([...roleImageAssets, ...scenePosterAssets]);
+}
+
+async function warmVideoAssetsSequentially(assetUrls) {
+  for (const assetUrl of uniqueAssets(assetUrls)) {
+    try {
+      await loadStartupVideoAsset(assetUrl);
+    } catch {
+      // Ignore background warm failures and keep going.
+    }
+  }
 }
 
 function clearAssetWarmTimer() {
